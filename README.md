@@ -1,15 +1,15 @@
-# Docker Code Executor MCP Service
+# Docker Code Executor
 
-This is an MCP (Model Context Protocol) based Docker code execution service that allows secure code execution in isolated Docker containers. The service can be used to test and execute code snippets or projects in various programming languages in an isolated environment.
+A secure MCP (Model Context Protocol) based service for executing code in isolated Docker containers. This service provides a safe environment for testing and running code snippets or projects in various programming languages.
 
 ## Features
 
-- Secure code execution in isolated Docker containers
-- Support for multiple programming languages (Python, Bash, etc.)
-- File operation functionality (read, write, list)
-- Project structure exploration
-- Container lifecycle management
-- Support for stdio and SSE transport methods
+- **Isolated Execution**: Run code securely in Docker containers
+- **Multi-language Support**: Execute Python, Bash, and other language code
+- **File Operations**: Read, write, and manage files within containers
+- **Directory Management**: Create and explore project structures
+- **Container Lifecycle**: Full management of execution environments
+- **Flexible Transport**: Support for stdio and HTTP communication
 
 ## Requirements
 
@@ -21,13 +21,13 @@ This is an MCP (Model Context Protocol) based Docker code execution service that
 ## Installation
 
 ```bash
-# Install dependencies using uv
+# Install dependencies using uv (recommended)
 uv pip install mcp==1.6.0 docker
 
 # Or install from pyproject.toml
 uv pip install -e .
 
-# Clone repository (if applicable)
+# Clone the repository (if applicable)
 git clone https://github.com/yourusername/docker-code-executor.git
 cd docker-code-executor
 ```
@@ -36,106 +36,131 @@ cd docker-code-executor
 
 ### Starting the Server
 
-The server can be started with two transport methods:
-
-#### 1. Standard Input/Output (stdio) Mode
+#### Standard Input/Output (stdio) Mode
 
 ```bash
-python src/code_executor_mcp_server.py  # Original version (requires specific MCP library components)
-# Or use the simplified version
-python src/mcp_server_simplified.py     # Simplified version (compatible with current MCP library version)
+python src/server.py
 ```
 
-#### 2. HTTP Mode
+
+#### SSE Mode
 
 ```bash
-export MCP_HTTP_MODE=true
-export MCP_HOST=localhost
-export MCP_PORT=8000
-python src/mcp_server_simplified.py
+export MCP_SSE_MODE=true
+python src/server.py
 ```
 
 ### Using the Client
 
-Connect to the server using an MCP client and execute code:
+The project includes a lite client for interacting with the server:
 
 ```bash
-# Use the simplified client
-python src/mcp_client_simplified.py
-
-# Use HTTP mode
-MCP_HTTP_MODE=true MCP_HOST=localhost MCP_PORT=8000 python src/mcp_client_simplified.py
+# Use the lite client (stdio mode)
+python src/lite_client.py
 ```
 
-Or use the MCP library API for programming:
+## API Reference
+
+The Docker Code Executor provides these core tools:
+
+| Tool | Description |
+|------|-------------|
+| `create_executor` | Create a new Docker code executor instance |
+| `execute_code` | Run code in a container with specified language |
+| `delete_executor` | Remove an executor and clean up resources |
+| `list_directory` | List contents of a directory in the container |
+| `read_file` | Read the contents of a file |
+| `write_file` | Write content to a file |
+| `create_directory` | Create a new directory |
+| `project_structure` | Generate a tree view of the project structure |
+
+## Example Usage
+
+### Client Code Example
 
 ```python
-from mcp.client import ClientSession
+import json
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
-# Connect to HTTP server
-async with http_client.connect("http://localhost:8000") as session:
-    # Initialize session
-    await session.initialize({})
-    
-    # Create executor
-    result = await session.call_tool("create_executor", {"docker_image": "python:3-slim"})
-    executor_id = result["executor_id"]
-    
-    # Execute Python code
-    code = """
-    print("Hello from Docker container!")
-    """
-    result = await session.call_tool("execute_code", {
-        "executor_id": executor_id,
-        "language": "python",
-        "code": code
-    })
-    
-    print(result)
-    
-    # Clean up executor
-    await session.call_tool("delete_executor", {"executor_id": executor_id})
+# Set up connection to the server
+server_params = StdioServerParameters(
+    command="python",
+    args=["src/server.py"],
+    env=None,
+)
+
+async def main():
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            # Initialize the connection
+            await session.initialize()
+
+            # Create a Docker executor
+            executor_result = await session.call_tool("create_executor")
+            executor_id = json.loads(executor_result.content[0].text)["executor_id"]
+            
+            # Create a project directory
+            await session.call_tool("create_directory", {
+                "executor_id": executor_id, 
+                "dir_path": "my_project"
+            })
+
+            # Write a Python file
+            python_code = """
+import os
+print("Hello from Docker container!")
+print(f"Current directory: {os.getcwd()}")
+"""
+            await session.call_tool("write_file", {
+                "executor_id": executor_id, 
+                "file_path": "my_project/main.py", 
+                "content": python_code
+            })
+            
+            # Execute the code
+            result = await session.call_tool("execute_code", {
+                "executor_id": executor_id, 
+                "code": "cd /workspace/my_project && python main.py", 
+                "language": "bash"
+            })
+            
+            print(f"Execution result: {json.loads(result.content[0].text)['output']}")
+            
+            # Clean up resources
+            await session.call_tool("delete_executor", {"executor_id": executor_id})
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
 ```
-
-## Implementation Versions
-
-This project provides two implementation versions:
-
-1. **Complete Version** (`code_executor_mcp_server.py` and `code_executor_mcp_client.py`):
-   - Uses the complete MCP server components
-   - Supports stdio and SSE transport modes
-   - Requires specific versions of the MCP library
-
-2. **Simplified Version** (`mcp_server_simplified.py` and `mcp_client_simplified.py`):
-   - Compatible with the MCP library in the current environment
-   - Uses FastMCP and basic functions of the MCP server
-   - Supports stdio and HTTP transport modes
-   - Provides the same API and feature set as the complete version
-
-## API Functions
-
-The server provides the following tools:
-
-- `create_executor` - Create a new Docker code executor
-- `execute_code` - Execute code in the container
-- `delete_executor` - Delete executor and clean up resources
-- `list_directory` - List directory contents
-- `read_file` - Read file contents
-- `write_file` - Write content to a file
-- `create_directory` - Create a new directory
-- `project_structure` - Get project structure
-- `check_executor_health` - Check executor health status
 
 ## Security Considerations
 
-- The service uses network-isolated Docker containers to enhance security
-- Additional access restrictions are recommended in production environments
-- Input validation is implemented to prevent code injection attacks
-- Container resource usage is limited to prevent DoS attacks
+The Docker Code Executor implements several security measures:
+
+- Isolated Docker containers with resource limits
+- Network isolation to prevent unauthorized access
+- Input validation to guard against code injection attacks
+- Container privilege restrictions
+- Resource quotas (memory, CPU) to prevent DoS attacks
+
+For production deployments, consider adding:
+- Authentication and authorization
+- Rate limiting
+- Network firewall rules
+- Additional Docker security profiles
 
 ## Contributing
 
-Contributions through Issues and Pull Requests are welcome. Please ensure you follow the project's code style and commit message conventions.
+Contributions are welcome! Please follow these steps:
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
+
+Please ensure your code follows the project's style guidelines and includes appropriate tests.
 
 ## License
 
